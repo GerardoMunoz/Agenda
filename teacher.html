@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Teacher – Upload Exam</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: auto; }
+    img { max-width: 100%; margin-top: 10px; }
+    button { margin: 5px 0; }
+  </style>
+</head>
+<body>
+
+<h2>📘 Teacher – Exam Upload</h2>
+
+<!-- STUDENT SELECTION -->
+<h3>Student</h3>
+
+<select id="studentSelect"></select>
+<br />
+<button onclick="newStudent()">➕ New student</button>
+
+<div id="newStudentBox" style="display:none;">
+  <input id="studentCode" placeholder="Student code (ALG001)" />
+  <button onclick="createStudent()">Create</button>
+</div>
+
+<p id="studentInfo"></p>
+
+<hr />
+
+<!-- EXAM INFO -->
+<h3>Exam</h3>
+<input id="examName" placeholder="Exam name (LinearAlgebra-1)" />
+
+<hr />
+
+<!-- IMAGE INPUT -->
+<h3>Upload pages</h3>
+
+<input
+  type="file"
+  accept="image/*"
+  capture="environment"
+  multiple
+  onchange="handleImages(event)"
+/>
+
+<div id="preview"></div>
+
+<button onclick="uploadExam()">⬆ Upload Exam</button>
+
+<hr />
+
+<h3>Student URL</h3>
+<input id="studentUrl" style="width:100%" readonly />
+<hr />
+<h3>Student registry</h3>
+<button onclick="exportStudents()">⬇ Export students</button>
+<input type="file" accept=".json" onchange="importStudents(event)" />
+
+<script>
+/* ---------------- CONFIG ---------------- */
+
+const SUPABASE_URL = "https://ztucdmcleqajxvyabiyv.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_tQtSGptUIUbRedUARlPgBQ__LX8N41m";
+const BUCKET = "exam-data";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* ---------------- STATE ---------------- */
+
+let students = JSON.parse(localStorage.getItem("students") || "[]");
+let currentStudent = null;
+let images = [];
+
+/* ---------------- INIT ---------------- */
+
+updateStudentSelect();
+
+/* ---------------- STUDENTS ---------------- */
+
+function exportStudents() {
+  const blob = new Blob(
+    [JSON.stringify(students, null, 2)],
+    { type: "application/json" }
+  );
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "students.json";
+  a.click();
+}
+
+function importStudents(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  file.text().then(text => {
+    try {
+      const imported = JSON.parse(text);
+      if (!Array.isArray(imported)) throw "Invalid format";
+
+      students = imported;
+      localStorage.setItem("students", JSON.stringify(students));
+      updateStudentSelect();
+      alert("Students imported ✔");
+    } catch {
+      alert("Invalid students.json");
+    }
+  });
+}
+
+
+function updateStudentSelect() {
+  const sel = document.getElementById("studentSelect");
+  sel.innerHTML = "";
+
+  students.forEach((s, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = s.student_code;
+    sel.appendChild(opt);
+  });
+
+  sel.onchange = () => {
+    currentStudent = students[sel.value];
+    showStudent();
+  };
+
+  if (students.length > 0) {
+    currentStudent = students[0];
+    showStudent();
+  }
+}
+
+function newStudent() {
+  document.getElementById("newStudentBox").style.display = "block";
+}
+
+function createStudent() {
+  const code = document.getElementById("studentCode").value.trim();
+  if (!code) return alert("Student code required");
+
+  const token = crypto.randomUUID().replaceAll("-", "");
+  const folder = `${code}_${token}`;
+
+  const student = { student_code: code, folder };
+  students.push(student);
+
+  localStorage.setItem("students", JSON.stringify(students));
+
+  document.getElementById("newStudentBox").style.display = "none";
+  document.getElementById("studentCode").value = "";
+
+  updateStudentSelect();
+}
+
+function showStudent() {
+  document.getElementById("studentInfo").textContent =
+    `Folder: ${currentStudent.folder}`;
+}
+
+/* ---------------- IMAGES ---------------- */
+
+function handleImages(e) {
+  images = [...e.target.files];
+  const preview = document.getElementById("preview");
+  preview.innerHTML = "";
+
+  images.forEach(file => {
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(file);
+    preview.appendChild(img);
+  });
+}
+
+/* ---------------- UPLOAD ---------------- */
+
+async function uploadExam() {
+  if (!currentStudent) return alert("Select student");
+  if (images.length === 0) return alert("No images");
+  const examName = document.getElementById("examName").value.trim();
+  if (!examName) return alert("Exam name required");
+
+  const date = new Date().toISOString().slice(0, 10);
+  const basePath =
+    `students/${currentStudent.folder}/exams/${date}_${examName}`;
+
+  // Upload images
+  for (let i = 0; i < images.length; i++) {
+    const ts = Date.now();
+    //const path = `${basePath}/pages/page_${i + 1}.jpg`;
+    const path = `${basePath}/pages/${ts}_${examName}`;
+    await supabaseClient.storage
+      .from(BUCKET)
+      .upload(path, images[i], { upsert: true });
+  }
+
+  // Create empty submission.json
+  await supabaseClient.storage
+    .from(BUCKET)
+    .upload(
+      `${basePath}/submission.json`,
+      JSON.stringify({ pages: [] }),
+      { contentType: "application/json", upsert: true }
+    );
+
+  // Student URL
+  const url =
+    `https://gerardomunoz.github.io/Agenda/student.html` +
+    `?token=${currentStudent.folder}`;
+
+  document.getElementById("studentUrl").value = url;
+
+  alert("Exam uploaded ✔");
+}
+</script>
+
+</body>
+</html>
