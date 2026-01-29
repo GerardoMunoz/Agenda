@@ -11,46 +11,48 @@
     body {
       font-family: system-ui, sans-serif;
       padding: 16px;
-      background: #f7f7f7;
+      background: #f6f7f9;
     }
     h2 {
       text-align: center;
     }
     .exam {
       background: white;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
       cursor: pointer;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
     .exam:hover {
-      background: #eef3ff;
+      background: #eef2ff;
     }
     .date {
       font-weight: bold;
+      margin-bottom: 4px;
     }
     .title {
       color: #555;
     }
     .error {
-      color: red;
+      color: #c00;
       text-align: center;
+      margin-top: 20px;
     }
   </style>
 </head>
 <body>
 
 <h2>📘 My Exams</h2>
-<div id="list"></div>
+<div id="examList"></div>
 <p id="error" class="error"></p>
 
 <script>
 /* ==========================
    CONFIG
 ========================== */
-const SUPABASE_URL = "https://ztucdmcleqajxvyabiyv.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_tQtSGptUIUbRedUARlPgBQ__LX8N41m";
+const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY";
 const BUCKET = "exam-data";
 
 /* ==========================
@@ -60,8 +62,8 @@ const params = new URLSearchParams(window.location.search);
 const token = params.get("token");
 
 if (!token) {
-  document.getElementById("error").textContent = "Invalid access link.";
-  throw new Error("No token");
+  showError("Invalid access link.");
+  throw new Error("No token provided");
 }
 
 /* ==========================
@@ -69,58 +71,42 @@ if (!token) {
 ========================== */
 const supabase = window.supabase.createClient(
   SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  {
-    global: {
-      headers: {
-        "x-access-token": token
-      }
-    }
-  }
+  SUPABASE_ANON_KEY
 );
 
 /* ==========================
    INIT
 ========================== */
-loadStudentAgenda();
+loadAgenda();
 
 /* ==========================
    LOAD AGENDA
 ========================== */
-async function loadStudentAgenda() {
-  // 1️⃣ Resolve student_code from token
-  const { data: access, error } = await supabase
-    .from("student_access")
-    .select("student_code")
-    .single();
+async function loadAgenda() {
+  const examsPath = `students/${token}/exams`;
 
-  if (error || !access) {
-    showError("Access denied.");
-    return;
-  }
-
-  const studentCode = access.student_code;
-  const examsPath = `students/${studentCode}/exams`;
-
-  // 2️⃣ List exam folders
-  const { data: folders, error: listErr } = await supabase
+  // 1️⃣ List exam directories
+  const { data: folders, error } = await supabase
     .storage
     .from(BUCKET)
-    .list(examsPath, { sortBy: { column: "name", order: "desc" } });
+    .list(examsPath, {
+      sortBy: { column: "name", order: "desc" }
+    });
 
-  if (listErr) {
-    showError(listErr.message);
+  if (error) {
+    showError("Unable to load exams.");
     return;
   }
 
   if (!folders || folders.length === 0) {
-    showError("No exams found.");
+    showError("No exams available.");
     return;
   }
 
-  // 3️⃣ Load exam.json from each folder
+  // 2️⃣ Load exam.json from each exam folder
   for (const folder of folders) {
-    const examJsonPath = `${examsPath}/${folder.name}/exam.json`;
+    const examJsonPath =
+      `${examsPath}/${folder.name}/exam.json`;
 
     const { data: signed } = await supabase
       .storage
@@ -133,16 +119,17 @@ async function loadStudentAgenda() {
     if (!res.ok) continue;
 
     const exam = await res.json();
-    renderExam(studentCode, folder.name, exam);
+    renderExam(folder.name, exam);
   }
 }
 
 /* ==========================
    RENDER
 ========================== */
-function renderExam(studentCode, examDir, exam) {
+function renderExam(examDir, exam) {
   const div = document.createElement("div");
   div.className = "exam";
+
   div.innerHTML = `
     <div class="date">📅 ${exam.date}</div>
     <div class="title">${exam.title}</div>
@@ -153,7 +140,7 @@ function renderExam(studentCode, examDir, exam) {
       `view_exam.html?token=${token}&exam=${examDir}`;
   };
 
-  document.getElementById("list").appendChild(div);
+  document.getElementById("examList").appendChild(div);
 }
 
 /* ==========================
