@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>My Exams</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 16px;
+      background: #f7f7f7;
+    }
+    h2 {
+      text-align: center;
+    }
+    .exam {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+    }
+    .exam:hover {
+      background: #eef3ff;
+    }
+    .date {
+      font-weight: bold;
+    }
+    .title {
+      color: #555;
+    }
+    .error {
+      color: red;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<h2>📘 My Exams</h2>
+<div id="list"></div>
+<p id="error" class="error"></p>
+
+<script>
+/* ==========================
+   CONFIG
+========================== */
+const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY";
+const BUCKET = "exam-data";
+
+/* ==========================
+   TOKEN FROM URL
+========================== */
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
+
+if (!token) {
+  document.getElementById("error").textContent = "Invalid access link.";
+  throw new Error("No token");
+}
+
+/* ==========================
+   SUPABASE CLIENT
+========================== */
+const supabase = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  {
+    global: {
+      headers: {
+        "x-access-token": token
+      }
+    }
+  }
+);
+
+/* ==========================
+   INIT
+========================== */
+loadStudentAgenda();
+
+/* ==========================
+   LOAD AGENDA
+========================== */
+async function loadStudentAgenda() {
+  // 1️⃣ Resolve student_code from token
+  const { data: access, error } = await supabase
+    .from("student_access")
+    .select("student_code")
+    .single();
+
+  if (error || !access) {
+    showError("Access denied.");
+    return;
+  }
+
+  const studentCode = access.student_code;
+  const examsPath = `students/${studentCode}/exams`;
+
+  // 2️⃣ List exam folders
+  const { data: folders, error: listErr } = await supabase
+    .storage
+    .from(BUCKET)
+    .list(examsPath, { sortBy: { column: "name", order: "desc" } });
+
+  if (listErr) {
+    showError(listErr.message);
+    return;
+  }
+
+  if (!folders || folders.length === 0) {
+    showError("No exams found.");
+    return;
+  }
+
+  // 3️⃣ Load exam.json from each folder
+  for (const folder of folders) {
+    const examJsonPath = `${examsPath}/${folder.name}/exam.json`;
+
+    const { data: signed } = await supabase
+      .storage
+      .from(BUCKET)
+      .createSignedUrl(examJsonPath, 60);
+
+    if (!signed) continue;
+
+    const res = await fetch(signed.signedUrl);
+    if (!res.ok) continue;
+
+    const exam = await res.json();
+    renderExam(studentCode, folder.name, exam);
+  }
+}
+
+/* ==========================
+   RENDER
+========================== */
+function renderExam(studentCode, examDir, exam) {
+  const div = document.createElement("div");
+  div.className = "exam";
+  div.innerHTML = `
+    <div class="date">📅 ${exam.date}</div>
+    <div class="title">${exam.title}</div>
+  `;
+
+  div.onclick = () => {
+    window.location.href =
+      `view_exam.html?token=${token}&exam=${examDir}`;
+  };
+
+  document.getElementById("list").appendChild(div);
+}
+
+/* ==========================
+   ERROR
+========================== */
+function showError(msg) {
+  document.getElementById("error").textContent = msg;
+}
+</script>
+
+</body>
+</html>
