@@ -2,153 +2,163 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>My Exams</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-
+  <title>Student Agenda</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body {
-      font-family: system-ui, sans-serif;
-      padding: 16px;
-      background: #f6f7f9;
+      font-family: sans-serif;
+      max-width: 700px;
+      margin: auto;
     }
-    h2 {
-      text-align: center;
-    }
-    .exam {
-      background: white;
-      border-radius: 10px;
-      padding: 14px;
-      margin-bottom: 12px;
+
+    .event {
+      border: 1px solid #ccc;
+      padding: 8px;
+      margin-bottom: 6px;
       cursor: pointer;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-    .exam:hover {
-      background: #eef2ff;
+
+    .event.selected {
+      background: #eef;
+      border-color: #66f;
     }
-    .date {
-      font-weight: bold;
-      margin-bottom: 4px;
+
+    .actions {
+      margin-top: 15px;
+      padding: 10px;
+      border-top: 1px solid #ccc;
     }
-    .title {
-      color: #555;
-    }
-    .error {
-      color: #c00;
-      text-align: center;
-      margin-top: 20px;
+
+    button {
+      padding: 8px 12px;
+      font-size: 14px;
     }
   </style>
 </head>
 <body>
 
-<h2>📘 My Exams</h2>
-<div id="examList"></div>
-<p id="error" class="error"></p>
+<h2>📅 My Agenda</h2>
+
+<div id="events">Loading…</div>
+
+<div class="actions" id="actions" style="display:none;"></div>
 
 <script>
-/* ==========================
-   CONFIG
-========================== */
-const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY";
+/* ================= CONFIG ================= */
+
+const SUPABASE_URL = "https://ztucdmcleqajxvyabiyv.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_tQtSGptUIUbRedUARlPgBQ__LX8N41m";
 const BUCKET = "exam-data";
 
-/* ==========================
-   TOKEN FROM URL
-========================== */
-const params = new URLSearchParams(window.location.search);
-const token = params.get("token");
-
-if (!token) {
-  showError("Invalid access link.");
-  throw new Error("No token provided");
-}
-
-/* ==========================
-   SUPABASE CLIENT
-========================== */
-const supabase = window.supabase.createClient(
+const supabaseClient = supabase.createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY
 );
 
-/* ==========================
-   INIT
-========================== */
-loadAgenda();
+/* ================= TOKEN ================= */
 
-/* ==========================
-   LOAD AGENDA
-========================== */
-async function loadAgenda() {
-  const examsPath = `students/${token}/exams`;
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
 
-  // 1️⃣ List exam directories
-  const { data: folders, error } = await supabase
-    .storage
-    .from(BUCKET)
-    .list(examsPath, {
-      sortBy: { column: "name", order: "desc" }
-    });
+if (!token) {
+  document.body.innerHTML = "<h3>Invalid link</h3>";
+  throw new Error("Missing token");
+}
 
-  if (error) {
-    showError("Unable to load exams.");
-    return;
-  }
+/* ================= LOAD EVENTS ================= */
 
-  if (!folders || folders.length === 0) {
-    showError("No exams available.");
-    return;
-  }
+let selectedEvent = null;
 
-  // 2️⃣ Load exam.json from each exam folder
-  for (const folder of folders) {
-    const examJsonPath =
-      `${examsPath}/${folder.name}/exam.json`;
+async function loadEvents() {
+  const container = document.getElementById("events");
 
-    const { data: signed } = await supabase
-      .storage
+  const { data: files, error } =
+    await supabaseClient.storage
       .from(BUCKET)
-      .createSignedUrl(examJsonPath, 60);
+      .list(`students/${token}/agenda`);
 
-    if (!signed) continue;
+  if (error || !files.length) {
+    container.innerHTML = "No events yet.";
+    return;
+  }
 
-    const res = await fetch(signed.signedUrl);
-    if (!res.ok) continue;
+  const events = [];
 
-    const exam = await res.json();
-    renderExam(folder.name, exam);
+  for (const f of files) {
+    const path = `students/${token}/agenda/${f.name}`;
+    const { data } = await supabaseClient.storage.from(BUCKET).download(path);
+    const evt = JSON.parse(await data.text());
+
+    evt._filename = f.name;
+    evt._ts = f.name.split(".")[0];
+    events.push(evt);
+  }
+
+  // newest first
+  events.sort((a, b) => b._ts.localeCompare(a._ts));
+
+  container.innerHTML = "";
+
+  events.forEach(evt => {
+    const div = document.createElement("div");
+    div.className = "event";
+
+    div.textContent = describeEvent(evt);
+
+    div.onclick = () => selectEvent(div, evt);
+    container.appendChild(div);
+  });
+}
+
+/* ================= UI HELPERS ================= */
+
+function describeEvent(e) {
+  switch (e.type) {
+    case "exam_created":
+      return `📘 Exam created: ${e.examName}`;
+    case "page_added":
+      return `📄 Page added: ${e.page} (${e.examId})`;
+    case "block_added":
+      return `🧩 Block added on ${e.page}`;
+    default:
+      return `🔹 ${e.type}`;
   }
 }
 
-/* ==========================
-   RENDER
-========================== */
-function renderExam(examDir, exam) {
-  const div = document.createElement("div");
-  div.className = "exam";
+function selectEvent(div, evt) {
+  document.querySelectorAll(".event")
+    .forEach(e => e.classList.remove("selected"));
 
-  div.innerHTML = `
-    <div class="date">📅 ${exam.date}</div>
-    <div class="title">${exam.title}</div>
-  `;
-
-  div.onclick = () => {
-    window.location.href =
-      `view_exam.html?token=${token}&exam=${examDir}`;
-  };
-
-  document.getElementById("examList").appendChild(div);
+  div.classList.add("selected");
+  selectedEvent = evt;
+  renderActions(evt);
 }
 
-/* ==========================
-   ERROR
-========================== */
-function showError(msg) {
-  document.getElementById("error").textContent = msg;
+function renderActions(evt) {
+  const actions = document.getElementById("actions");
+  actions.innerHTML = "";
+  actions.style.display = "block";
+
+  if (evt.type === "page_added") {
+    const btn = document.createElement("button");
+    btn.textContent = "✏️ Transcribe this page";
+
+    btn.onclick = () => {
+      const url =
+        `page.html?token=${encodeURIComponent(token)}` +
+        `&exam=${encodeURIComponent(evt.examId)}` +
+        `&page=${encodeURIComponent(evt.page)}`;
+
+      window.location.href = url;
+    };
+
+    actions.appendChild(btn);
+  } else {
+    actions.textContent = "No actions for this event.";
+  }
 }
+
+loadEvents();
 </script>
 
 </body>

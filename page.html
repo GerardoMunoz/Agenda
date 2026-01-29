@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Transcribe Page</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: auto;
+    }
+
+    #canvasWrapper {
+      position: relative;
+      display: inline-block;
+      border: 1px solid #ccc;
+      touch-action: none;
+    }
+
+    #examImage {
+      max-width: 100%;
+      display: block;
+    }
+
+    .rect-old {
+      position: absolute;
+      border: 2px solid blue;
+      pointer-events: none;
+    }
+
+    .rect-new {
+      position: absolute;
+      border: 2px dashed red;
+      pointer-events: none;
+    }
+
+    textarea {
+      width: 100%;
+      height: 80px;
+      margin-top: 10px;
+    }
+
+    button {
+      margin-top: 10px;
+      margin-right: 8px;
+      padding: 8px 12px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>✏️ Transcribe Page</h2>
+
+<div id="canvasWrapper">
+  <img id="examImage" />
+</div>
+
+<p>Draw one rectangle, then write LaTeX:</p>
+
+<textarea id="latex" placeholder="Enter LaTeX here"></textarea><br>
+
+<button id="saveBtn">💾 Save block</button>
+<button id="discardBtn">🗑 Discard block</button>
+
+<script>
+/* ================= CONFIG ================= */
+
+const SUPABASE_URL = "https://ztucdmcleqajxvyabiyv.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_tQtSGptUIUbRedUARlPgBQ__LX8N41m";
+const BUCKET = "exam-data";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* ================= PARAMS ================= */
+
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
+const examId = params.get("exam");
+const pageFile = params.get("page");
+
+if (!token || !examId || !pageFile) {
+  document.body.innerHTML = "<h3>Invalid link</h3>";
+  throw new Error("Missing params");
+}
+
+/* ================= IMAGE ================= */
+
+const imagePath =
+  `students/${token}/exams/${examId}/${pageFile}`;
+
+const img = document.getElementById("examImage");
+const wrapper = document.getElementById("canvasWrapper");
+
+async function loadImage() {
+  const { data } =
+    await supabaseClient.storage
+      .from(BUCKET)
+      .createSignedUrl(imagePath, 60 * 30);
+
+  img.src = data.signedUrl;
+}
+
+loadImage();
+
+/* ================= LOAD OLD BLOCKS ================= */
+
+async function loadOldBlocks() {
+  const { data: files } =
+    await supabaseClient.storage
+      .from(BUCKET)
+      .list(`students/${token}/agenda`);
+
+  for (const f of files) {
+    const { data } =
+      await supabaseClient.storage
+        .from(BUCKET)
+        .download(`students/${token}/agenda/${f.name}`);
+
+    const evt = JSON.parse(await data.text());
+
+    if (
+      evt.type === "block_added" &&
+      evt.examId === examId &&
+      evt.page === pageFile
+    ) {
+      drawOldRect(evt);
+    }
+  }
+}
+
+function drawOldRect(evt) {
+  const r = document.createElement("div");
+  r.className = "rect-old";
+
+  r.style.left = (evt.x * img.clientWidth) + "px";
+  r.style.top = (evt.y * img.clientHeight) + "px";
+  r.style.width = (evt.width * img.clientWidth) + "px";
+  r.style.height = (evt.height * img.clientHeight) + "px";
+
+  wrapper.appendChild(r);
+}
+
+img.onload = loadOldBlocks;
+
+/* ================= DRAW NEW RECT ================= */
+
+let drawingEnabled = true;
+let rectDiv = null;
+let rect = null;
+let startX, startY;
+
+wrapper.addEventListener("pointerdown", e => {
+  if (!drawingEnabled) return;
+
+  const r = wrapper.getBoundingClientRect();
+  startX = e.clientX - r.left;
+  startY = e.clientY - r.top;
+
+  rectDiv = document.createElement("div");
+  rectDiv.className = "rect-new";
+  rectDiv.style.left = startX + "px";
+  rectDiv.style.top = startY + "px";
+  wrapper.appendChild(rectDiv);
+
+  wrapper.setPointerCapture(e.pointerId);
+});
+
+wrapper.addEventListener("pointermove", e => {
+  if (!rectDiv) return;
+
+  const r = wrapper.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const y = e.clientY - r.top;
+
+  rectDiv.style.left = Math.min(x, startX) + "px";
+  rectDiv.style.top = Math.min(y, startY) + "px";
+  rectDiv.style.width = Math.abs(x - startX) + "px";
+  rectDiv.style.height = Math.abs(y - startY) + "px";
+});
+
+wrapper.addEventListener("pointerup", () => {
+  if (!rectDiv) return;
+
+  drawingEnabled = false;
+
+  rect = {
+    x: rectDiv.offsetLeft / img.clientWidth,
+    y: rectDiv.offsetTop / img.clientHeight,
+    width: rectDiv.offsetWidth / img.clientWidth,
+    height: rectDiv.offsetHeight / img.clientHeight
+  };
+});
+
+/* ================= SAVE / DISCARD ================= */
+
+document.getElementById("saveBtn").onclick = async () => {
+  if (!rect || !latex.value.trim()) {
+    alert("Draw a block and write LaTeX");
+    return;
+  }
+
+  const evt = {
+    type: "block_added",
+    examId,
+    page: pageFile,
+    ...rect,
+    latex: latex.value.trim()
+  };
+
+  const filename =
+    new Date().toISOString() + ".block_added.json";
+
+  await supabaseClient.storage
+    .from(BUCKET)
+    .upload(
+      `students/${token}/agenda/${filename}`,
+      new Blob([JSON.stringify(evt, null, 2)])
+    );
+
+  resetEditor();
+  drawOldRect(evt);
+};
+
+document.getElementById("discardBtn").onclick = () => {
+  resetEditor();
+};
+
+function resetEditor() {
+  rectDiv?.remove();
+  rectDiv = null;
+  rect = null;
+  latex.value = "";
+  drawingEnabled = true;
+}
+</script>
+
+</body>
+</html>
