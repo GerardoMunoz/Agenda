@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>View Exam</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 10px;
+      text-align: center;
+    }
+    img {
+      max-width: 100%;
+      border: 1px solid #ccc;
+      margin-top: 10px;
+    }
+    button {
+      margin: 8px;
+      padding: 8px 14px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Exam</h2>
+<p id="info"></p>
+
+<div>
+  <button onclick="prevPage()">◀ Previous</button>
+  <button onclick="nextPage()">Next ▶</button>
+</div>
+
+<img id="examImage" />
+
+<p id="pageInfo"></p>
+
+<script>
+/* =============================
+   CONFIG (PUBLIC)
+============================= */
+const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* =============================
+   URL PARAMS
+============================= */
+const params = new URLSearchParams(window.location.search);
+const studentCode = params.get("student");
+const examId = params.get("exam");
+
+/* =============================
+   STATE
+============================= */
+let pages = [];
+let currentPage = 0;
+
+/* =============================
+   INIT
+============================= */
+if (!studentCode || !examId) {
+  document.body.innerHTML = "<h3>Invalid exam link</h3>";
+} else {
+  document.getElementById("info").textContent =
+    `Student: ${studentCode} — Exam: ${examId}`;
+  loadPages();
+}
+
+/* =============================
+   LOAD PAGES
+============================= */
+async function loadPages() {
+  const basePath =
+    `students/${studentCode}/exams/${examId}/pages`;
+
+  const { data, error } = await supabaseClient.storage
+    .from("exam-data")
+    .list(basePath, { sortBy: { column: "name", order: "asc" } });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  pages = data.map(f => `${basePath}/${f.name}`);
+
+  if (pages.length === 0) {
+    alert("No pages found");
+    return;
+  }
+
+  await showPage(0);
+}
+
+/* =============================
+   SHOW PAGE
+============================= */
+async function showPage(index) {
+  if (index < 0 || index >= pages.length) return;
+
+  currentPage = index;
+
+  const { data, error } = await supabaseClient.storage
+    .from("exam-data")
+    .createSignedUrl(pages[index], 60 * 30); // 30 min
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  document.getElementById("examImage").src = data.signedUrl;
+  document.getElementById("pageInfo").textContent =
+    `Page ${index + 1} of ${pages.length}`;
+}
+
+function nextPage() {
+  showPage(currentPage + 1);
+}
+
+function prevPage() {
+  showPage(currentPage - 1);
+}
+</script>
+
+</body>
+</html>
