@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <title>Transcribe Page</title>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+
   <style>
     body {
       font-family: sans-serif;
@@ -25,14 +28,20 @@
 
     .rect-old {
       position: absolute;
-      border: 2px solid blue;
+      border: 2px solid green;
       pointer-events: none;
+      overflow: hidden;
     }
 
     .rect-new {
       position: absolute;
       border: 2px dashed red;
       pointer-events: none;
+    }
+
+    .rect-text {
+      padding: 4px;
+      font-size: 12px;
     }
 
     textarea {
@@ -53,7 +62,7 @@
 <h2>✏️ Transcribe Page</h2>
 
 <div id="canvasWrapper">
-  <img id="examImage" />
+  <img id="examImage" draggable="false" />
 </div>
 
 <p>Draw one rectangle, then write LaTeX:</p>
@@ -89,11 +98,11 @@ if (!token || !examId || !pageFile) {
 
 /* ================= IMAGE ================= */
 
-const imagePath =
-  `students/${token}/exams/${examId}/${pageFile}`;
-
 const img = document.getElementById("examImage");
 const wrapper = document.getElementById("canvasWrapper");
+
+const imagePath =
+  `students/${token}/exams/${examId}/${pageFile}`;
 
 async function loadImage() {
   const { data } =
@@ -114,7 +123,7 @@ async function loadOldBlocks() {
       .from(BUCKET)
       .list(`students/${token}/agenda`);
 
-  for (const f of files) {
+  for (const f of files || []) {
     const { data } =
       await supabaseClient.storage
         .from(BUCKET)
@@ -141,63 +150,77 @@ function drawOldRect(evt) {
   r.style.width = (evt.width * img.clientWidth) + "px";
   r.style.height = (evt.height * img.clientHeight) + "px";
 
+  const text = document.createElement("div");
+  text.className = "rect-text";
+  text.textContent = evt.latex;
+
+  r.appendChild(text);
   wrapper.appendChild(r);
+
+  if (window.MathJax) {
+    MathJax.typesetPromise([r]);
+  }
 }
 
-img.onload = loadOldBlocks;
+img.onload = () => requestAnimationFrame(loadOldBlocks);
 
 /* ================= DRAW NEW RECT ================= */
 
+let isDrawing = false;
 let drawingEnabled = true;
-let rectDiv = null;
+
+let activeRectDiv = null;
 let rect = null;
-let startX, startY;
+let startX = 0;
+let startY = 0;
 
 wrapper.addEventListener("pointerdown", e => {
   if (!drawingEnabled) return;
 
+  isDrawing = true;
   const r = wrapper.getBoundingClientRect();
   startX = e.clientX - r.left;
   startY = e.clientY - r.top;
 
-  rectDiv = document.createElement("div");
-  rectDiv.className = "rect-new";
-  rectDiv.style.left = startX + "px";
-  rectDiv.style.top = startY + "px";
-  wrapper.appendChild(rectDiv);
+  activeRectDiv = document.createElement("div");
+  activeRectDiv.className = "rect-new";
+  activeRectDiv.style.left = startX + "px";
+  activeRectDiv.style.top = startY + "px";
 
+  wrapper.appendChild(activeRectDiv);
   wrapper.setPointerCapture(e.pointerId);
 });
 
 wrapper.addEventListener("pointermove", e => {
-  if (!rectDiv) return;
+  if (!isDrawing || !activeRectDiv) return;
 
   const r = wrapper.getBoundingClientRect();
   const x = e.clientX - r.left;
   const y = e.clientY - r.top;
 
-  rectDiv.style.left = Math.min(x, startX) + "px";
-  rectDiv.style.top = Math.min(y, startY) + "px";
-  rectDiv.style.width = Math.abs(x - startX) + "px";
-  rectDiv.style.height = Math.abs(y - startY) + "px";
+  activeRectDiv.style.left = Math.min(x, startX) + "px";
+  activeRectDiv.style.top = Math.min(y, startY) + "px";
+  activeRectDiv.style.width = Math.abs(x - startX) + "px";
+  activeRectDiv.style.height = Math.abs(y - startY) + "px";
 });
 
-wrapper.addEventListener("pointerup", () => {
-  if (!rectDiv) return;
+wrapper.addEventListener("pointerup", e => {
+  if (!activeRectDiv) return;
 
+  isDrawing = false;
   drawingEnabled = false;
 
   rect = {
-    x: rectDiv.offsetLeft / img.clientWidth,
-    y: rectDiv.offsetTop / img.clientHeight,
-    width: rectDiv.offsetWidth / img.clientWidth,
-    height: rectDiv.offsetHeight / img.clientHeight
+    x: activeRectDiv.offsetLeft / img.clientWidth,
+    y: activeRectDiv.offsetTop / img.clientHeight,
+    width: activeRectDiv.offsetWidth / img.clientWidth,
+    height: activeRectDiv.offsetHeight / img.clientHeight
   };
 });
 
 /* ================= SAVE / DISCARD ================= */
 
-document.getElementById("saveBtn").onclick = async () => {
+saveBtn.onclick = async () => {
   if (!rect || !latex.value.trim()) {
     alert("Draw a block and write LaTeX");
     return;
@@ -225,13 +248,11 @@ document.getElementById("saveBtn").onclick = async () => {
   drawOldRect(evt);
 };
 
-document.getElementById("discardBtn").onclick = () => {
-  resetEditor();
-};
+discardBtn.onclick = () => resetEditor();
 
 function resetEditor() {
-  rectDiv?.remove();
-  rectDiv = null;
+  activeRectDiv?.remove();
+  activeRectDiv = null;
   rect = null;
   latex.value = "";
   drawingEnabled = true;
