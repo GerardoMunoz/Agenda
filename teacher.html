@@ -42,10 +42,10 @@
 
 <hr />
 
-<!-- EXAM -->
-<h3>Exam</h3>
-<input id="examName" placeholder="Exam name (ex2)" />
-
+<!-- Task -->
+<h3>Task</h3>
+<input id="taskName" placeholder="Task name (task_01)" />
+<button onclick="createTask()">Create Task</button>
 <hr />
 
 <!-- IMAGES -->
@@ -96,6 +96,25 @@ let images = [];
 
 refreshStudents();
 
+/* ================= TASK ================= */
+async function createTask() {
+  if (!currentStudent) return alert("Select student");
+  const taskName = document.getElementById("taskName").value.trim();
+  if (!taskName) return alert("Task name required");
+
+  const date = new Date().toISOString().slice(0, 10);
+  const examId = `${date}_${taskName}`;
+  const basePath =
+    `students/${currentStudent.folder}/exams/${examId}`;
+
+  // 1️⃣ exam_created
+  await writeAgendaEvent(currentStudent.folder, {
+    type: "task_created",
+    examId,
+    taskName,
+    date
+  });
+}
 /* ================= STUDENTS ================= */
 
 function exportStudents() {
@@ -215,7 +234,7 @@ async function writeAgendaEvent(studentFolder, event) {
 async function uploadExam() {
   if (!currentStudent) return alert("Select student");
   if (!images.length) return alert("No images");
-  const examName = document.getElementById("examName").value.trim();
+  const examName = document.getElementById("taskName").value.trim();
   if (!examName) return alert("Exam name required");
 
   const date = new Date().toISOString().slice(0, 10);
@@ -224,12 +243,12 @@ async function uploadExam() {
     `students/${currentStudent.folder}/exams/${examId}`;
 
   // 1️⃣ exam_created
-  await writeAgendaEvent(currentStudent.folder, {
-    type: "exam_created",
-    examId,
-    examName,
-    date
-  });
+  //await writeAgendaEvent(currentStudent.folder, {
+  //  type: "exam_created",
+  //  examId,
+  //  examName,
+  //  date
+  //});
 
   // 2️⃣ pages
   for (const file of images) {
