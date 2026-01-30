@@ -56,6 +56,12 @@
 <h3>Student URL</h3>
 <input id="studentUrl" style="width:100%" readonly />
 
+  <hr />
+<h3>Student registry</h3>
+<button onclick="exportStudents()">⬇ Export students</button>
+<input type="file" accept=".json" onchange="importStudents(event)" />
+
+
 <script>
 /* ================= CONFIG ================= */
 
@@ -79,6 +85,39 @@ let images = [];
 refreshStudents();
 
 /* ================= STUDENTS ================= */
+
+
+ function exportStudents() {
+  const blob = new Blob(
+    [JSON.stringify(students, null, 2)],
+    { type: "application/json" }
+  );
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "students.json";
+  a.click();
+}
+
+function importStudents(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  file.text().then(text => {
+    try {
+      const imported = JSON.parse(text);
+      if (!Array.isArray(imported)) throw "Invalid format";
+
+      students = imported;
+      localStorage.setItem("students", JSON.stringify(students));
+      updateStudentSelect();
+      alert("Students imported ✔");
+    } catch {
+      alert("Invalid students.json");
+    }
+  });
+}
+ 
 
 function refreshStudents() {
   const sel = document.getElementById("studentSelect");
@@ -210,3 +249,4 @@ async function uploadExam() {
 
 </body>
 </html>
+
