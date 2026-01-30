@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Upload Homework</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: auto;
+    }
+
+    input, button {
+      margin-top: 10px;
+      width: 100%;
+      padding: 8px;
+    }
+
+    img {
+      max-width: 100%;
+      margin-top: 10px;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+
+<h2>📸 Upload Homework</h2>
+
+<label>
+  Task name:
+  <input id="taskName" placeholder="e.g. homework1" />
+</label>
+
+<input
+  type="file"
+  id="imageInput"
+  accept="image/*"
+  capture="environment"
+/>
+
+<img id="preview" />
+
+<button id="uploadBtn">⬆️ Upload</button>
+
+<script>
+/* ================= CONFIG ================= */
+
+const SUPABASE_URL = "https://ztucdmcleqajxvyabiyv.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_tQtSGptUIUbRedUARlPgBQ__LX8N41m";
+const BUCKET = "exam-data";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* ================= PARAMS ================= */
+
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
+
+if (!token) {
+  document.body.innerHTML = "<h3>Invalid link</h3>";
+  throw new Error("Missing token");
+}
+
+/* ================= IMAGE PREVIEW ================= */
+
+const imageInput = document.getElementById("imageInput");
+const preview = document.getElementById("preview");
+
+let selectedFile = null;
+
+imageInput.onchange = () => {
+  selectedFile = imageInput.files[0];
+  preview.src = URL.createObjectURL(selectedFile);
+};
+
+/* ================= UPLOAD ================= */
+
+document.getElementById("uploadBtn").onclick = async () => {
+  const taskName = document.getElementById("taskName").value.trim();
+
+  if (!taskName || !selectedFile) {
+    alert("Task name and image required");
+    return;
+  }
+
+  const date = new Date().toISOString().slice(0, 10);
+  const taskDir = `tasks/${date}_${taskName}`;
+  const imagePath = `${taskDir}/image_1.jpg`;
+
+  /* Upload image */
+  await supabaseClient.storage
+    .from(BUCKET)
+    .upload(
+      `students/${token}/${imagePath}`,
+      selectedFile,
+      { upsert: false }
+    );
+
+  /* Emit agenda event */
+  const evt = {
+    type: "task_image_added",
+    taskName,
+    image: imagePath,
+    createdAt: new Date().toISOString()
+  };
+
+  const evtFile =
+    `students/${token}/agenda/${new Date().toISOString()}.task_image_added.json`;
+
+  await supabaseClient.storage
+    .from(BUCKET)
+    .upload(
+      evtFile,
+      new Blob([JSON.stringify(evt, null, 2)])
+    );
+
+  alert("Homework uploaded ✅");
+
+  /* reset UI */
+  preview.src = "";
+  imageInput.value = "";
+};
+</script>
+
+</body>
+</html>
