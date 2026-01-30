@@ -152,7 +152,8 @@ function drawOldRect(evt) {
 
   const text = document.createElement("div");
   text.className = "rect-text";
-  text.textContent = evt.latex;
+  //text.textContent = evt.latex;
+  r.innerHTML = `\\(${evt.latex}\\)`;
 
   r.appendChild(text);
   wrapper.appendChild(r);
@@ -261,3 +262,4 @@ function resetEditor() {
 
 </body>
 </html>
+
