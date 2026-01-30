@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Correct Blocks</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 900px;
+      margin: auto;
+    }
+
+    #canvasWrapper {
+      position: relative;
+      display: inline-block;
+      border: 1px solid #ccc;
+    }
+
+    img {
+      max-width: 100%;
+      display: block;
+    }
+
+    .block {
+      position: absolute;
+      border: 2px solid green;
+      cursor: pointer;
+    }
+
+    .block.selected {
+      border-color: red;
+    }
+
+    #panel {
+      margin-top: 15px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 80px;
+    }
+
+    button {
+      margin-top: 8px;
+      padding: 6px 10px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>🧠 Correct Transcribed Blocks</h2>
+
+<div id="canvasWrapper">
+  <img id="examImage" />
+</div>
+
+<div id="panel" hidden>
+  <h3>Correction</h3>
+  <textarea id="correction"></textarea><br>
+  <button id="saveCorrection">💾 Save correction</button>
+</div>
+
+<script>
+/* ================= CONFIG ================= */
+
+const SUPABASE_URL = "https://ztucdmcleqajxvyabiyv.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_tQtSGptUIUbRedUARlPgBQ__LX8N41m";
+const BUCKET = "exam-data";
+
+const supabaseClient = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
+
+/* ================= PARAMS ================= */
+
+const params = new URLSearchParams(location.search);
+const token = params.get("token");
+const examId = params.get("exam");
+const pageFile = params.get("page");
+
+if (!token || !examId || !pageFile) {
+  document.body.innerHTML = "<h3>Invalid link</h3>";
+  throw new Error("Missing params");
+}
+
+/* ================= IMAGE ================= */
+
+const img = document.getElementById("examImage");
+const wrapper = document.getElementById("canvasWrapper");
+
+(async () => {
+  const { data } = await supabaseClient.storage
+    .from(BUCKET)
+    .createSignedUrl(
+      `students/${token}/exams/${examId}/${pageFile}`,
+      1800
+    );
+
+  img.src = data.signedUrl;
+})();
+
+/* ================= LOAD BLOCKS ================= */
+
+let selectedBlock = null;
+
+img.onload = async () => {
+  const { data: files } =
+    await supabaseClient.storage
+      .from(BUCKET)
+      .list(`students/${token}/agenda`);
+
+  for (const f of files) {
+    const { data } =
+      await supabaseClient.storage
+        .from(BUCKET)
+        .download(`students/${token}/agenda/${f.name}`);
+
+    const evt = JSON.parse(await data.text());
+
+    if (
+      evt.type === "block_added" &&
+      evt.examId === examId &&
+      evt.page === pageFile
+    ) {
+      drawBlock(evt, f.name);
+    }
+  }
+};
+
+function drawBlock(evt, eventFile) {
+  const d = document.createElement("div");
+  d.className = "block";
+
+  d.style.left = evt.x * img.clientWidth + "px";
+  d.style.top = evt.y * img.clientHeight + "px";
+  d.style.width = evt.width * img.clientWidth + "px";
+  d.style.height = evt.height * img.clientHeight + "px";
+
+  d.innerHTML = evt.latex;
+
+  d.onclick = () => {
+    document
+      .querySelectorAll(".block")
+      .forEach(b => b.classList.remove("selected"));
+
+    d.classList.add("selected");
+    selectedBlock = { evt, eventFile };
+    document.getElementById("panel").hidden = false;
+  };
+
+  wrapper.appendChild(d);
+  MathJax.typesetPromise([d]);
+}
+
+/* ================= SAVE CORRECTION ================= */
+
+document.getElementById("saveCorrection").onclick = async () => {
+  if (!selectedBlock) return;
+
+  const correction = document
+    .getElementById("correction")
+    .value.trim();
+
+  if (!correction) return;
+
+  const evt = {
+    type: "block_corrected",
+    examId,
+    page: pageFile,
+    blockEvent: selectedBlock.eventFile,
+    correction,
+    createdAt: new Date().toISOString()
+  };
+
+  const name =
+    `students/${token}/agenda/${new Date().toISOString()}.block_corrected.json`;
+
+  await supabaseClient.storage
+    .from(BUCKET)
+    .upload(name, new Blob([JSON.stringify(evt, null, 2)]));
+
+  alert("Correction saved ✅");
+  document.getElementById("panel").hidden = true;
+  document.getElementById("correction").value = "";
+};
+</script>
+
+</body>
+</html>
