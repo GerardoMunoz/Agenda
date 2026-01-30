@@ -5,10 +5,22 @@
   <title>Teacher – Event-based Exam Upload</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: sans-serif; max-width: 720px; margin: auto; }
-    img { max-width: 100%; margin-top: 8px; }
-    button { margin: 6px 0; }
-    hr { margin: 20px 0; }
+    body {
+      font-family: sans-serif;
+      max-width: 720px;
+      margin: auto;
+    }
+    img {
+      max-width: 100%;
+      margin-top: 8px;
+      border: 1px solid #ccc;
+    }
+    button {
+      margin: 6px 0;
+    }
+    hr {
+      margin: 20px 0;
+    }
   </style>
 </head>
 <body>
@@ -56,11 +68,11 @@
 <h3>Student URL</h3>
 <input id="studentUrl" style="width:100%" readonly />
 
-  <hr />
+<hr />
+
 <h3>Student registry</h3>
 <button onclick="exportStudents()">⬇ Export students</button>
 <input type="file" accept=".json" onchange="importStudents(event)" />
-
 
 <script>
 /* ================= CONFIG ================= */
@@ -86,8 +98,7 @@ refreshStudents();
 
 /* ================= STUDENTS ================= */
 
-
- function exportStudents() {
+function exportStudents() {
   const blob = new Blob(
     [JSON.stringify(students, null, 2)],
     { type: "application/json" }
@@ -110,14 +121,13 @@ function importStudents(e) {
 
       students = imported;
       localStorage.setItem("students", JSON.stringify(students));
-      updateStudentSelect();
+      refreshStudents();
       alert("Students imported ✔");
     } catch {
       alert("Invalid students.json");
     }
   });
 }
- 
 
 function refreshStudents() {
   const sel = document.getElementById("studentSelect");
@@ -173,29 +183,29 @@ function handleImages(e) {
   const preview = document.getElementById("preview");
   preview.innerHTML = "";
 
-  images.forEach(f => {
+  images.forEach(file => {
     const img = document.createElement("img");
-    img.src = URL.createObjectURL(f);
+    img.src = URL.createObjectURL(file);
     preview.appendChild(img);
   });
 }
 
 /* ================= AGENDA EVENTS ================= */
 
-function isoNow() {
-  return new Date().toISOString();
+function isoNowSafe() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
 async function writeAgendaEvent(studentFolder, event) {
-  const name =
+  const path =
     `students/${studentFolder}/agenda/` +
-    `${isoNow()}.${event.type}.json`;
+    `${isoNowSafe()}.${event.type}.json`;
 
   await supabaseClient.storage
     .from(BUCKET)
     .upload(
-      name,
-      JSON.stringify(event),
+      path,
+      JSON.stringify(event, null, 2),
       { contentType: "application/json" }
     );
 }
@@ -213,7 +223,7 @@ async function uploadExam() {
   const basePath =
     `students/${currentStudent.folder}/exams/${examId}`;
 
-  // 1️⃣ exam_created event
+  // 1️⃣ exam_created
   await writeAgendaEvent(currentStudent.folder, {
     type: "exam_created",
     examId,
@@ -221,15 +231,16 @@ async function uploadExam() {
     date
   });
 
-  // 2️⃣ upload pages + page_added events
+  // 2️⃣ pages
   for (const file of images) {
-    const ts = Date.now();
-    const pageName = `page_${ts}.jpg`;
+    const ext = file.name.split(".").pop() || "jpg";
+    const ts = isoNowSafe();
+    const pageName = `page_${ts}.${ext}`;
     const pagePath = `${basePath}/${pageName}`;
 
     await supabaseClient.storage
       .from(BUCKET)
-      .upload(pagePath, file);
+      .upload(pagePath, file, { upsert: false });
 
     await writeAgendaEvent(currentStudent.folder, {
       type: "page_added",
@@ -238,7 +249,6 @@ async function uploadExam() {
     });
   }
 
-  // student URL
   document.getElementById("studentUrl").value =
     `https://gerardomunoz.github.io/Agenda/student.html` +
     `?token=${currentStudent.folder}`;
@@ -249,4 +259,3 @@ async function uploadExam() {
 
 </body>
 </html>
-
