@@ -20,7 +20,7 @@
       border: 1px solid #ccc;
     }
 
-    img {
+    #examImage {
       max-width: 100%;
       display: block;
     }
@@ -28,6 +28,7 @@
     .block {
       position: absolute;
       border: 2px solid green;
+      box-sizing: border-box;
       cursor: pointer;
     }
 
@@ -35,8 +36,32 @@
       border-color: red;
     }
 
+    .block-controls {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      background: rgba(255,255,255,0.9);
+      padding: 2px 4px;
+      font-size: 11px;
+      display: none;
+      z-index: 10;
+    }
+
+    .block:hover .block-controls,
+    .block.selected .block-controls {
+      display: block;
+    }
+
+    .block-content {
+      padding: 18px 4px 4px 4px;
+      font-size: 13px;
+      overflow: hidden;
+    }
+
     #panel {
       margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
     }
 
     textarea {
@@ -59,7 +84,7 @@
 </div>
 
 <div id="panel" hidden>
-  <h3>Correction</h3>
+  <h3>Add correction</h3>
   <textarea id="correction"></textarea><br>
   <button id="saveCorrection">💾 Save correction</button>
 </div>
@@ -104,15 +129,21 @@ const wrapper = document.getElementById("canvasWrapper");
   img.src = data.signedUrl;
 })();
 
-/* ================= LOAD BLOCKS ================= */
+/* ================= LOAD EVENTS ================= */
 
-let selectedBlock = null;
+let selectedBlockId = null;
 
-img.onload = async () => {
+img.onload = () => {
+  requestAnimationFrame(loadBlocksFromAgenda);
+};
+
+async function loadBlocksFromAgenda() {
   const { data: files } =
     await supabaseClient.storage
       .from(BUCKET)
       .list(`students/${token}/agenda`);
+
+  const blocks = {};
 
   for (const f of files) {
     const { data } =
@@ -123,57 +154,99 @@ img.onload = async () => {
     const evt = JSON.parse(await data.text());
 
     if (
-      evt.type === "block_added" &&
+      (evt.type === "block_added" || evt.type === "block_corrected") &&
       evt.examId === examId &&
       evt.page === pageFile
     ) {
-      drawBlock(evt, f.name);
+      const blockId = evt.blockId || evt.sourceBlock || f.name;
+
+      blocks[blockId] ??= {
+        rect: evt,
+        versions: []
+      };
+
+      blocks[blockId].versions.push(evt);
     }
   }
-};
 
-function drawBlock(evt, eventFile) {
-  const d = document.createElement("div");
-  d.className = "block";
+  Object.entries(blocks).forEach(([blockId, data]) => {
+    renderBlock(blockId, data.versions, data.rect);
+  });
+}
 
-  d.style.left = evt.x * img.clientWidth + "px";
-  d.style.top = evt.y * img.clientHeight + "px";
-  d.style.width = evt.width * img.clientWidth + "px";
-  d.style.height = evt.height * img.clientHeight + "px";
+/* ================= RENDER BLOCK ================= */
 
-  d.innerHTML = evt.latex;
+function renderBlock(blockId, versions, rect) {
+  const block = document.createElement("div");
+  block.className = "block";
 
-  d.onclick = () => {
+  block.style.left = rect.x * img.clientWidth + "px";
+  block.style.top = rect.y * img.clientHeight + "px";
+  block.style.width = rect.width * img.clientWidth + "px";
+  block.style.height = rect.height * img.clientHeight + "px";
+
+  const controls = document.createElement("div");
+  controls.className = "block-controls";
+
+  const content = document.createElement("div");
+  content.className = "block-content";
+
+  versions.forEach((v, i) => {
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+
+    radio.type = "radio";
+    radio.name = blockId;
+    radio.checked = i === 0;
+
+    radio.onchange = () => {
+      content.textContent = v.latex;
+      MathJax.typesetPromise([content]);
+    };
+
+    label.appendChild(radio);
+    label.append(" " + (i === 0 ? "T" : `C${i}`));
+    controls.appendChild(label);
+
+    if (i === 0) {
+      content.textContent = v.latex;
+    }
+  });
+
+  block.onclick = () => {
     document
       .querySelectorAll(".block")
       .forEach(b => b.classList.remove("selected"));
 
-    d.classList.add("selected");
-    selectedBlock = { evt, eventFile };
+    block.classList.add("selected");
+    selectedBlockId = blockId;
     document.getElementById("panel").hidden = false;
   };
 
-  wrapper.appendChild(d);
-  MathJax.typesetPromise([d]);
+  block.appendChild(controls);
+  block.appendChild(content);
+  wrapper.appendChild(block);
+
+  MathJax.typesetPromise([block]);
 }
 
 /* ================= SAVE CORRECTION ================= */
 
 document.getElementById("saveCorrection").onclick = async () => {
-  if (!selectedBlock) return;
+  if (!selectedBlockId) return;
 
-  const correction = document
+  const text = document
     .getElementById("correction")
     .value.trim();
 
-  if (!correction) return;
+  if (!text) return;
 
   const evt = {
     type: "block_corrected",
     examId,
     page: pageFile,
-    blockEvent: selectedBlock.eventFile,
-    correction,
+    blockId: selectedBlockId,
+    latex: text,
     createdAt: new Date().toISOString()
   };
 
@@ -185,8 +258,7 @@ document.getElementById("saveCorrection").onclick = async () => {
     .upload(name, new Blob([JSON.stringify(evt, null, 2)]));
 
   alert("Correction saved ✅");
-  document.getElementById("panel").hidden = true;
-  document.getElementById("correction").value = "";
+  location.reload();
 };
 </script>
 
